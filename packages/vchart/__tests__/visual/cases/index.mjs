@@ -9,6 +9,7 @@ export const cases = [
     purpose: '标题重测后图例过滤不使绘图区坍缩',
     file: './components/title/title-resize-legend-layout.mjs'
   },
+  { id: 'injected-stage', purpose: '传入 Stage 的绘制准备、事件源与资源所有权', file: './api/injected-stage.mjs' },
   { id: 'linear-axis-update-bounds', purpose: '连续轴更新显式边界后实际域与柱几何同步', file: './components/axis/linear-axis-update-bounds.mjs' },
   { id: 'band-axis-update-spec', purpose: '分类轴 updateSpec 应用新的主题与标签样式', file: './components/axis/band-axis-update-spec.mjs' },
   { id: 'legend-piecewise-domain', purpose: '多节点连续色域图例的完整范围', file: './components/legend/legend-piecewise-domain.mjs' },
