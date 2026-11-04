@@ -62,11 +62,12 @@ export default {
       const rect = stage.find(g => g.name === 'crosshair-rect', true);
       const crosshairVisible =
         !!rect && rect.attribute.visible !== false && rect.attribute.width > 0 && rect.attribute.height > 0;
-      const counts = { canvas: 0, window: 0 };
+      const counts = { canvas: 0, window: 0, cancel: 0 };
       const dimensions = [];
       chart.on('dimensionHover', p => dimensions.push(p.action));
       chart.on('pointermove', { source: 'canvas' }, () => counts.canvas++);
       chart.on('pointerup', { source: 'window' }, () => counts.window++);
+      chart.on('pointercancel', { source: 'canvas' }, () => counts.cancel++);
       window.__injectedStage = {
         chart,
         stage,
@@ -139,6 +140,7 @@ export default {
         s.blocked.window !== 0 ||
         !s.allowed.canvas ||
         !s.allowed.window ||
+        s.allowed.cancel !== 1 ||
         !s.cleaned
       ) {
         throw new Error(
