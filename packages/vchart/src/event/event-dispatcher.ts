@@ -344,11 +344,7 @@ export class EventDispatcher implements IEventDispatcher {
       const filter = handler.filter as EventFilter;
       if (!handler.prevented && (!handler.query || this._filter(filter, type, params))) {
         const callback = handler.wrappedCallback || handler.callback;
-        const callbackParams = { ...params };
-        if (handler.wrappedCallback && params.event) {
-          callbackParams.event = this._snapshotInputEvent(params.event);
-        }
-        const stopBubble = callback.call(null, callbackParams);
+        const stopBubble = callback.call(null, { ...params });
         const doStopBubble = stopBubble ?? handler.query?.consume;
         if (doStopBubble) {
           (params as BaseEventParams).event?.stopPropagation();
@@ -411,10 +407,24 @@ export class EventDispatcher implements IEventDispatcher {
   private _parseQuery(handler: EventHandler<EventParams>): EventHandler<EventParams> {
     const query = handler.query;
     // 处理 query 带来的函数封装
-    if (query?.throttle) {
-      handler.wrappedCallback = throttle(handler.callback, query.throttle);
-    } else if (query?.debounce) {
-      handler.wrappedCallback = debounce(handler.callback, query.debounce);
+    if (query?.throttle || query?.debounce) {
+      const wrap = query.throttle ? throttle : debounce;
+      const callback = wrap(
+        (getParams: () => EventParams) => handler.callback(getParams()),
+        query.throttle || query.debounce
+      );
+      handler.wrappedCallback = Object.assign((params: EventParams) => {
+        let invoked = false;
+        const result = callback(() => {
+          invoked = true;
+          return params;
+        });
+        // throttle can invoke synchronously; only pending callbacks retain a snapshot.
+        if (!invoked && params.event) {
+          params.event = this._snapshotInputEvent(params.event);
+        }
+        return result;
+      }, callback);
     }
     let level = this._getQueryLevel(query);
     let type: string | null = null;

@@ -80,6 +80,49 @@ describe('[event] delayed input', () => {
     }
   });
 
+  test('throttle leading callback stops subsequent engine listeners on the original event', () => {
+    const { event, dispatcher, manager, sources } = setup();
+    manager.rootTarget = sources.chart as unknown as EventManager['rootTarget'];
+    const input = new FederatedPointerEvent(manager);
+    input.type = 'pointerdown';
+    input.pointerId = 1;
+    input.target = manager.rootTarget;
+    const copy = jest.spyOn(manager, 'copyMouseData');
+    const received = jest.fn(params => params.event.stopImmediatePropagation());
+    const host = jest.fn();
+    event.on('pointerdown', { throttle: 20 }, received);
+    sources.chart.on('pointerdown', host);
+    try {
+      manager.dispatchEvent(input);
+      expect(received).toHaveBeenCalledTimes(1);
+      expect(received.mock.calls[0][0].event).toBe(input);
+      expect(input.propagationImmediatelyStopped).toBe(true);
+      expect(host).not.toHaveBeenCalled();
+      expect(copy).not.toHaveBeenCalled();
+    } finally {
+      event.release();
+      dispatcher.release();
+    }
+  });
+
+  test.each([
+    ['stopPropagation', 'propagationStopped'],
+    ['preventDefault', 'defaultPrevented']
+  ] as const)('throttle leading callback preserves %s on the original event', (method, flag) => {
+    const { event, dispatcher, sources } = setup();
+    const input = new FederatedPointerEvent();
+    input.pointerId = 1;
+    input.nativeEvent = {} as PointerEvent;
+    event.on('pointerdown', { source: 'canvas', throttle: 20 }, params => params.event[method]());
+    try {
+      sources.canvas.emit('pointerdown', input);
+      expect(input[flag]).toBe(true);
+    } finally {
+      event.release();
+      dispatcher.release();
+    }
+  });
+
   test('debounce preserves wheel deltas and coordinates', async () => {
     const { event, dispatcher, sources } = setup();
     const input = new FederatedWheelEvent();
