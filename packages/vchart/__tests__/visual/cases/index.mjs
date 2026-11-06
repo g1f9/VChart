@@ -1180,6 +1180,11 @@ export const cases = [
     file: './api/state/dimension-index-area.mjs'
   },
   {
+    id: 'dimension-index-leave',
+    purpose: 'setDimensionIndex 激活维度后经留白移出画布清理折线点高亮',
+    file: './api/state/dimension-index-leave.mjs'
+  },
+  {
     id: 'custom-mark-text-click',
     purpose: '来源 customMark 点击回调修改实际图元',
     file: './interaction/custom-mark-text-click.mjs'

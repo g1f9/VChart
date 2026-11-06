@@ -45,6 +45,11 @@ export class DimensionHoverEvent extends DimensionEvent {
     this._eventHandlers.clear();
   }
 
+  protected onDispatch(dimensionInfo: IDimensionInfo[]) {
+    this._cacheDimensionInfo = dimensionInfo.length ? dimensionInfo.slice() : null;
+    super.onDispatch(dimensionInfo);
+  }
+
   private onMouseMove = (params: BaseEventParams) => {
     if (!params || params.chart?.getOption()?.globalInstance?.disableDimensionHoverEvent?.()) {
       return;

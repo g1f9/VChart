@@ -6,6 +6,7 @@ import type { VChart } from '../../../src/core/vchart';
 import { Event } from '../../../src/event/event';
 import { EventDispatcher } from '../../../src/event/event-dispatcher';
 import { DimensionHoverEvent } from '../../../src/event/events/dimension/dimension-hover';
+import { DimensionClickEvent } from '../../../src/event/events/dimension/dimension-click';
 import type { IDimensionInfo } from '../../../src/event/events/dimension/interface';
 import type { RenderMode } from '../../../src/typings';
 
@@ -19,7 +20,14 @@ const createEvent = (canvas = new EventEmitter(), mode: RenderMode = 'desktop-br
     window: { addEventListener: canvas.on.bind(canvas), removeEventListener: canvas.off.bind(canvas) }
   } as unknown as IStage;
   const dimensionInfo: IDimensionInfo[] = [{ value: 'A', data: [] }];
-  const chart = { getOption: () => ({}), getModelOption: () => ({ getDimensionInfo: () => dimensionInfo }) };
+  const chart = {
+    getOption: () => ({}),
+    getAllComponents: () => [{ specKey: 'axes', getScale: () => ({ type: 'band' }) }],
+    getModelOption: () => ({
+      getDimensionInfo: () => dimensionInfo,
+      getDimensionInfoByValue: (_axis: unknown, value: unknown) => (value === 'A' ? dimensionInfo[0] : null)
+    })
+  };
   const dispatcher = new EventDispatcher({ getChart: () => chart } as unknown as VChart, compiler);
   const event = new Event(dispatcher, mode);
   const move = () => stageSource.emit('pointermove', { viewX: 10, viewY: 20 });
@@ -30,6 +38,57 @@ describe('[event] DimensionHoverEvent', () => {
   const originalHover = Factory.getComposedEvent('dimensionHover');
   beforeAll(() => Factory.registerComposedEvent('dimensionHover', DimensionHoverEvent));
   afterAll(() => Factory.registerComposedEvent('dimensionHover', originalHover));
+
+  test.each(['pointerout', 'pointercancel'] as const)('programmatic activation is cleared by %s', type => {
+    const { event, dispatcher, canvas, dimensionInfo, move } = createEvent();
+    const onHover = jest.fn();
+    event.on('dimensionHover', onHover);
+    const hover = event.getComposedEventMap().get(onHover).event;
+    expect(hover.dispatch('A', {})).toEqual(dimensionInfo);
+    canvas.emit(type, { type });
+    expect(onHover).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'leave', dimensionInfo }));
+    canvas.emit(type, { type });
+    expect(onHover).toHaveBeenCalledTimes(2);
+    move();
+    expect(onHover).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'enter', dimensionInfo }));
+    dispatcher.release();
+  });
+
+  test('programmatic activation is committed before a callback cancels it', () => {
+    const { event, dispatcher, canvas } = createEvent();
+    const onHover = jest.fn(params => {
+      if (params.action === 'enter') {
+        canvas.emit('pointercancel', { type: 'pointercancel' });
+      }
+    });
+    event.on('dimensionHover', onHover);
+    event.getComposedEventMap().get(onHover).event.dispatch('A', {});
+    expect(onHover.mock.calls.map(([params]) => params.action)).toEqual(['enter', 'leave']);
+    canvas.emit('pointerout', { type: 'pointerout' });
+    expect(onHover).toHaveBeenCalledTimes(2);
+    dispatcher.release();
+  });
+
+  test('an empty programmatic activation does not leave an active hover', () => {
+    const { event, dispatcher, canvas } = createEvent();
+    const onHover = jest.fn();
+    event.on('dimensionHover', onHover);
+    expect(event.getComposedEventMap().get(onHover).event.dispatch('missing', {})).toEqual([]);
+    canvas.emit('pointerout', { type: 'pointerout' });
+    expect(onHover).toHaveBeenCalledTimes(1);
+    dispatcher.release();
+  });
+
+  test('programmatic dimension click keeps its callback and return value', () => {
+    const { dispatcher, dimensionInfo } = createEvent();
+    const click = new DimensionClickEvent(dispatcher, 'desktop-browser');
+    const onClick = jest.fn();
+    click.register('dimensionClick', { query: null, callback: onClick });
+    expect(click.dispatch('A', {})).toEqual(dimensionInfo);
+    expect(onClick).toHaveBeenCalledWith({ action: 'enter', dimensionInfo });
+    click.unregister();
+    dispatcher.release();
+  });
 
   test('scoped pointercancel reaches public listeners and clears hover without pointerout', () => {
     const { event, dispatcher, canvas, dimensionInfo, move } = createEvent();
