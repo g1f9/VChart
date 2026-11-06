@@ -7,53 +7,42 @@ import type { IDimensionInfo } from './interface';
 
 export class DimensionHoverEvent extends DimensionEvent {
   private _cacheDimensionInfo: IDimensionInfo[] | null = null;
+  private _eventHandlers: Map<
+    'pointermove' | 'pointerout' | 'pointercancel' | 'pointerdown',
+    EventHandler<BaseEventParams>
+  > = new Map();
 
   register<Evt extends EventType>(eType: Evt, handler: EventHandler<EventParamsDefinition[Evt]>) {
     this._callback = handler.callback;
 
-    this._eventDispatcher.register<'pointermove'>('pointermove', {
+    this._eventHandlers.set('pointermove', {
       query: { ...handler.query, source: Event_Source_Type.chart },
       callback: this.onMouseMove
     });
 
-    this._eventDispatcher.register<'pointerout'>('pointerout', {
+    this._eventHandlers.set('pointerout', {
       query: { ...handler.query, source: Event_Source_Type.canvas },
       callback: this.onMouseOut
     });
 
-    this._eventDispatcher.register<'pointercancel'>('pointercancel', {
+    this._eventHandlers.set('pointercancel', {
       query: { ...handler.query, source: Event_Source_Type.canvas },
       callback: this.onMouseOut
     });
 
     if (isMobileLikeMode(this._mode)) {
       // 移动端点按也触发 hover
-      this._eventDispatcher.register<'pointerdown'>('pointerdown', {
+      this._eventHandlers.set('pointerdown', {
         query: { ...handler.query, source: Event_Source_Type.chart },
         callback: this.onMouseMove
       });
     }
+    this._eventHandlers.forEach((eventHandler, type) => this._eventDispatcher.register(type, eventHandler));
   }
 
   unregister() {
-    this._eventDispatcher.unregister('pointermove', {
-      query: null,
-      callback: this.onMouseMove
-    });
-    this._eventDispatcher.unregister('pointerout', {
-      query: null,
-      callback: this.onMouseOut
-    });
-
-    this._eventDispatcher.unregister('pointercancel', { query: null, callback: this.onMouseOut });
-
-    if (isMobileLikeMode(this._mode)) {
-      // 移动端点按也出发 hover
-      this._eventDispatcher.unregister('pointerdown', {
-        query: null,
-        callback: this.onMouseMove
-      });
-    }
+    this._eventHandlers.forEach((eventHandler, type) => this._eventDispatcher.unregister(type, eventHandler));
+    this._eventHandlers.clear();
   }
 
   private onMouseMove = (params: BaseEventParams) => {

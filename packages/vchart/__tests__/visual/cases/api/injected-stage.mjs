@@ -2,7 +2,7 @@
  * 验证目的：调用方提供 Stage 时保留调度权、执行图表绘制准备，并正确解绑注入的事件源。
  * 图表类型：bar；固定默认 crosshair 验证 beforeRender 的实际图元结果。
  * 场景条件：复用一个真实 Stage，暂停原生事件监听后 canvas/window 订阅不能绕过该输入源。
- * 最终检查：默认 crosshair 可见；拒绝期间零事件、恢复后有事件；释放图表不释放 Stage 或遗留订阅。
+ * 最终检查：默认 crosshair 可见；取消与重入生效；公开 off 后不再通知；释放不释放 Stage 或遗留订阅。
  * 覆盖边界：不验证宿主坐标映射、冻结窗格或原生 HTML Tooltip 定位。
  */
 export default {
@@ -25,7 +25,7 @@ export default {
           { x: 'B', s: 'Silver', y: 4 }
         ]
       },
-      tooltip: { visible: true, renderMode: 'html' }
+      tooltip: { visible: false }
     };
   },
   async exercise(page) {
@@ -52,6 +52,7 @@ export default {
       const chart = new window.VChart.default(
         {
           ...owner.getSpec(),
+          tooltip: { visible: true, renderMode: 'html', throttleInterval: 0, transitionDuration: 0 },
           crosshair: { xField: { visible: true, defaultSelect: { axisIndex: 0, datum: 'A' }, line: { type: 'rect' } } }
         },
         { stage, eventSource: source, autoFit: false, animation: false, poptip: false }
@@ -62,9 +63,12 @@ export default {
       const rect = stage.find(g => g.name === 'crosshair-rect', true);
       const crosshairVisible =
         !!rect && rect.attribute.visible !== false && rect.attribute.width > 0 && rect.attribute.height > 0;
-      const counts = { canvas: 0, window: 0, cancel: 0 };
+      const counts = { canvas: 0, window: 0, cancel: 0, rawCancel: 0 };
       const dimensions = [];
-      chart.on('dimensionHover', p => dimensions.push(p.action));
+      const onDimensionHover = p => dimensions.push(p.action);
+      const onRawCancel = () => counts.rawCancel++;
+      stage.eventSystem.input.canvas.on('pointercancel', onRawCancel);
+      chart.on('dimensionHover', onDimensionHover);
       chart.on('pointermove', { source: 'canvas' }, () => counts.canvas++);
       chart.on('pointerup', { source: 'window' }, () => counts.window++);
       chart.on('pointercancel', { source: 'canvas' }, () => counts.cancel++);
@@ -74,6 +78,8 @@ export default {
         count,
         counts,
         dimensions,
+        onDimensionHover,
+        onRawCancel,
         initialListeners,
         initialChildren,
         initialHooks,
@@ -104,6 +110,7 @@ export default {
     await page.mouse.move(point.x + 1, point.y + 1);
     await page.mouse.click(point.x + 1, point.y + 1);
     await page.mouse.move(point.sibling.x, point.sibling.y);
+    await page.waitForFunction(() => window.__injectedStage.chart.getTooltipHandler()?.isTooltipShown());
     await page.evaluate(() => {
       const state = window.__injectedStage;
       state.sameDimension = state.dimensions[0] === 'enter' && !state.dimensions.includes('leave');
@@ -111,6 +118,16 @@ export default {
       state.stage.eventSystem.cancelPointer(1);
       state.cancelledOnce = state.dimensions.filter(action => action === 'leave').length === 1;
       state.allowed = { ...state.counts };
+    });
+    await page.mouse.move(point.x + 2, point.y + 2);
+    await page.evaluate(() => {
+      const state = window.__injectedStage;
+      state.reentered = state.dimensions[state.dimensions.length - 1] === 'enter';
+      const beforeOff = state.dimensions.length;
+      state.chart.off('dimensionHover', state.onDimensionHover);
+      state.stage.eventSystem.cancelPointer(1);
+      state.unsubscribed = state.dimensions.length === beforeOff;
+      state.stage.eventSystem.input.canvas.off('pointercancel', state.onRawCancel);
       // Cleanup must use the source actually subscribed, even if options have since been replaced.
       const unexpected = {
         on() {},
@@ -127,13 +144,17 @@ export default {
         state.stage.hooks.beforeRender.taps.length === state.initialHooks;
       state.stage.render();
     });
+    // 原图表仍使用 DOM 事件源，移出画布后固定在无悬浮状态截图。
+    await page.mouse.move(900, 700);
   },
   async verify(page) {
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       const s = window.__injectedStage;
       if (
         !s.sameDimension ||
         !s.cancelledOnce ||
+        !s.reentered ||
+        !s.unsubscribed ||
         !s.crosshairVisible ||
         !s.keepsScheduling ||
         s.blocked.canvas !== 0 ||
@@ -141,14 +162,18 @@ export default {
         !s.allowed.canvas ||
         !s.allowed.window ||
         s.allowed.cancel !== 1 ||
+        s.allowed.rawCancel !== 1 ||
         !s.cleaned
       ) {
-        throw new Error(
+        const { assertionError } = await import('/suite/assertions.mjs');
+        throw assertionError(
           '传入 Stage 的绘制、输入或释放边界异常：' +
             JSON.stringify({
               dimensions: s.dimensions,
               sameDimension: s.sameDimension,
               cancelledOnce: s.cancelledOnce,
+              reentered: s.reentered,
+              unsubscribed: s.unsubscribed,
               crosshairVisible: s.crosshairVisible,
               keepsScheduling: s.keepsScheduling,
               blocked: s.blocked,
