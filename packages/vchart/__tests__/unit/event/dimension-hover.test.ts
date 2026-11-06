@@ -213,19 +213,26 @@ describe('[event] DimensionHoverEvent', () => {
     dispatcher.release();
   });
 
-  test('off cancels pending debounced hover callbacks', () => {
-    jest.useFakeTimers();
+  test('off cancels pending debounced hover callbacks', async () => {
     const { event, dispatcher, move } = createEvent();
+    const onHover = jest.fn();
+    const onActive = jest.fn();
     try {
-      const onHover = jest.fn();
       event.on('dimensionHover', { debounce: 10 }, onHover);
+      const completed = new Promise<void>(resolve => {
+        event.on('dimensionHover', { debounce: 10 }, params => {
+          onActive(params);
+          resolve();
+        });
+      });
       move();
       event.off('dimensionHover', onHover);
-      jest.runAllTimers();
+      await completed;
+      expect(onActive).toHaveBeenCalledTimes(1);
       expect(onHover).not.toHaveBeenCalled();
     } finally {
+      event.release();
       dispatcher.release();
-      jest.useRealTimers();
     }
   });
 });

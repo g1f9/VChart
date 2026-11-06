@@ -113,6 +113,26 @@ export default {
     await page.waitForFunction(() => window.__injectedStage.chart.getTooltipHandler()?.isTooltipShown());
     await page.evaluate(() => {
       const state = window.__injectedStage;
+      state.delayed = {};
+      state.delayedReady = new Promise(resolve => {
+        let pending = 2;
+        const capture = key => params => {
+          const event = params.event;
+          state.delayed[key] = { type: event.type, x: event.clientX, buttons: event.buttons };
+          if (--pending === 0) resolve();
+        };
+        state.chart.on('pointerdown', { source: 'canvas', debounce: 200 }, capture('injected'));
+        window.__visualChart.on('pointerdown', { source: 'canvas', debounce: 200 }, capture('dom'));
+      });
+    });
+    // 延迟回调必须保留按下的数据，不能读到随后移动和抬起复用的事件。
+    await page.mouse.move(200, 200);
+    await page.mouse.down();
+    await page.mouse.move(350, 200);
+    await page.mouse.up();
+    await page.evaluate(() => window.__injectedStage.delayedReady);
+    await page.evaluate(() => {
+      const state = window.__injectedStage;
       state.sameDimension = state.dimensions[0] === 'enter' && !state.dimensions.includes('leave');
       state.stage.eventSystem.cancelPointer(1);
       state.stage.eventSystem.cancelPointer(1);
@@ -150,7 +170,12 @@ export default {
   async verify(page) {
     await page.evaluate(async () => {
       const s = window.__injectedStage;
+      const delayedCorrect = ['dom', 'injected'].every(key => {
+        const event = s.delayed[key];
+        return event.type === 'pointerdown' && event.x === 200 && event.buttons === 1;
+      });
       if (
+        !delayedCorrect ||
         !s.sameDimension ||
         !s.cancelledOnce ||
         !s.reentered ||
@@ -170,6 +195,7 @@ export default {
           '传入 Stage 的绘制、输入或释放边界异常：' +
             JSON.stringify({
               dimensions: s.dimensions,
+              delayed: s.delayed,
               sameDimension: s.sameDimension,
               cancelledOnce: s.cancelledOnce,
               reentered: s.reentered,

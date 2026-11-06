@@ -29,6 +29,7 @@ import type { IComponent } from '../component/interface';
 import { Factory } from '../core/factory';
 import type { IMarkGraphic } from '../mark/interface';
 import { getDatumOfGraphic } from '../util';
+import type { FederatedPointerEvent, FederatedWheelEvent } from '@visactor/vrender-core';
 
 const componentTypeMap: Record<string, string> = {
   cartesianAxis: 'axis',
@@ -343,7 +344,11 @@ export class EventDispatcher implements IEventDispatcher {
       const filter = handler.filter as EventFilter;
       if (!handler.prevented && (!handler.query || this._filter(filter, type, params))) {
         const callback = handler.wrappedCallback || handler.callback;
-        const stopBubble = callback.call(null, { ...params });
+        const callbackParams = { ...params };
+        if (handler.wrappedCallback && params.event) {
+          callbackParams.event = this._snapshotInputEvent(params.event);
+        }
+        const stopBubble = callback.call(null, callbackParams);
         const doStopBubble = stopBubble ?? handler.query?.consume;
         if (doStopBubble) {
           (params as BaseEventParams).event?.stopPropagation();
@@ -355,6 +360,31 @@ export class EventDispatcher implements IEventDispatcher {
     });
     // 如果某个事件回调阻止了冒泡，则阻止更高级别事件的调用过程
     return result.some(r => r === true);
+  }
+
+  private _snapshotInputEvent(event: EventParams['event']): EventParams['event'] {
+    if (!isFunction(event?.clone) || !('pointerId' in event || 'deltaMode' in event)) {
+      return event;
+    }
+    const input = event as FederatedPointerEvent | FederatedWheelEvent;
+    const manager = input.manager ?? this._compiler.getStage().eventSystem.manager;
+    const EventConstructor = input.constructor as new (eventManager: typeof manager) => typeof input;
+    const snapshot = new EventConstructor(manager);
+    // Accepted root input has no manager; use its Stage's standard copy methods.
+    manager.copyPointerData(input, snapshot);
+    manager.copyMouseData(input, snapshot);
+    manager.copyData(input, snapshot);
+    if ('deltaMode' in input) {
+      manager.copyWheelData(input, snapshot as FederatedWheelEvent);
+    }
+    snapshot.nativeEvent = input.nativeEvent;
+    snapshot.originalEvent = input.originalEvent;
+    snapshot.target = input.target;
+    snapshot.relatedTarget = input.relatedTarget;
+    snapshot.timeStamp = input.timeStamp;
+    snapshot.path = input.path?.slice() ?? [];
+    snapshot.detailPath = input.detailPath?.slice();
+    return snapshot;
   }
 
   /**
